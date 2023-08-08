@@ -2,7 +2,8 @@
 
 package day2
 
-import java.util.concurrent.atomic.*
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 
 class MSQueueWithConstantTimeRemove<E> : QueueWithRemove<E> {
     private val head: AtomicReference<Node<E>>
@@ -18,7 +19,24 @@ class MSQueueWithConstantTimeRemove<E> : QueueWithRemove<E> {
         // TODO: When adding a new node, check whether
         // TODO: the previous tail is logically removed.
         // TODO: If so, remove it physically from the linked list.
-        TODO("Implement me!")
+        while (true) {
+            val curTail = tail.get()
+            val node = Node(element, curTail)
+            if (curTail.next.compareAndSet(null, node)) {
+                tail.compareAndSet(curTail, node)
+                if (curTail.extractedOrRemoved) {
+                    curTail.remove()
+                }
+                return
+            }
+            val curNextTail = curTail.next.get()
+            if (curNextTail != null) {
+                tail.compareAndSet(curTail, curNextTail)
+            }
+            if (curTail.extractedOrRemoved) {
+                curTail.remove()
+            }
+        }
     }
 
     override fun dequeue(): E? {
@@ -26,7 +44,17 @@ class MSQueueWithConstantTimeRemove<E> : QueueWithRemove<E> {
         // TODO: mark the node that contains the extracting
         // TODO: element as "extracted or removed", restarting
         // TODO: the operation if this node has already been removed.
-        TODO("Implement me!")
+        while (true) {
+            val curHead = head.get()
+            val curHeadNext = curHead.next.get() ?: return null
+            curHeadNext.prev.set(null)
+            if (head.compareAndSet(curHead, curHeadNext)) {
+                if (curHeadNext.markExtractedOrRemoved()) {
+                    return curHeadNext.element
+                }
+                curHeadNext.next.get() ?: return null
+            }
+        }
     }
 
     override fun remove(element: E): Boolean {
@@ -90,11 +118,9 @@ class MSQueueWithConstantTimeRemove<E> : QueueWithRemove<E> {
          */
         private val _extractedOrRemoved = AtomicBoolean(false)
         val extractedOrRemoved
-            get() =
-                _extractedOrRemoved.get()
+            get() = _extractedOrRemoved.get()
 
-        fun markExtractedOrRemoved(): Boolean =
-            _extractedOrRemoved.compareAndSet(false, true)
+        fun markExtractedOrRemoved(): Boolean = _extractedOrRemoved.compareAndSet(false, true)
 
         /**
          * Removes this node from the queue structure.
@@ -117,7 +143,21 @@ class MSQueueWithConstantTimeRemove<E> : QueueWithRemove<E> {
             // TODO: it is totally fine to have a bounded number of removed nodes
             // TODO: in the linked list, especially when it significantly simplifies
             // TODO: the algorithm.
-            TODO("Implement me!")
+            val removed = markExtractedOrRemoved()
+            val nextNode = next.get() ?: return removed
+            val prevNode = prev.get() ?: return removed
+            prevNode.next.set(nextNode)
+            while (true) {
+                val curPrevNext = nextNode.prev.get() ?: break
+                if (nextNode.prev.compareAndSet(curPrevNext, prevNode)) break
+            }
+            if (prevNode.extractedOrRemoved) {
+                prevNode.remove()
+            }
+            if (nextNode.extractedOrRemoved) {
+                nextNode.remove()
+            }
+            return removed
         }
     }
 }
