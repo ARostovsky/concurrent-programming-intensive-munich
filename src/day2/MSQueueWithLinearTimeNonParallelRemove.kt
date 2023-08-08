@@ -18,7 +18,19 @@ class MSQueueWithLinearTimeNonParallelRemove<E> : QueueWithRemove<E> {
         // TODO: When adding a new node, check whether
         // TODO: the previous tail is logically removed.
         // TODO: If so, remove it physically from the linked list.
-        TODO("Implement me!")
+        while (true) {
+            val node = Node(element)
+            val curTail = tail.get()
+            if (curTail.next.compareAndSet(null, node)) {
+                if (curTail.extractedOrRemoved) {
+                    curTail.remove()
+                }
+                tail.compareAndSet(curTail, node)
+                return
+            } else {
+                tail.compareAndSet(curTail, curTail.next.get())
+            }
+        }
     }
 
     override fun dequeue(): E? {
@@ -26,7 +38,13 @@ class MSQueueWithLinearTimeNonParallelRemove<E> : QueueWithRemove<E> {
         // TODO: mark the node that contains the extracting
         // TODO: element as "extracted or removed", restarting
         // TODO: the operation if this node has already been removed.
-        TODO("Implement me!")
+        while (true) {
+            val curHead = head.get()
+            val curHeadNext = curHead.next.get() ?: return null
+            if (head.compareAndSet(curHead, curHeadNext) && curHeadNext.markExtractedOrRemoved()) {
+                return curHeadNext.element
+            }
+        }
     }
 
     override fun remove(element: E): Boolean {
@@ -97,7 +115,25 @@ class MSQueueWithLinearTimeNonParallelRemove<E> : QueueWithRemove<E> {
             // TODO: Do not remove `head` and `tail` physically to make
             // TODO: the algorithm simpler. In case a tail node is logically removed,
             // TODO: it will be removed physically by `enqueue(..)`.
-            TODO("Implement me!")
+            val removed = markExtractedOrRemoved()
+            val prevNode = findPrev() ?: return removed
+            val nextNode = next.get() ?: return removed
+            prevNode.next.compareAndSet(this, nextNode)
+            return removed
+        }
+
+        private fun findPrev(): Node? {
+            var prevNode = head.get() ?: return null
+
+            while (true) {
+                val next = prevNode.next.get() ?: return null
+                if (next == this) {
+                    break
+                }
+                prevNode = next
+            }
+
+            return prevNode
         }
     }
 }
