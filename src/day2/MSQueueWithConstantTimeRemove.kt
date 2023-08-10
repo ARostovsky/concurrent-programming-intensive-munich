@@ -28,13 +28,8 @@ class MSQueueWithConstantTimeRemove<E> : QueueWithRemove<E> {
                     curTail.remove()
                 }
                 return
-            }
-            val curNextTail = curTail.next.get()
-            if (curNextTail != null) {
-                tail.compareAndSet(curTail, curNextTail)
-            }
-            if (curTail.extractedOrRemoved) {
-                curTail.remove()
+            } else {
+                tail.compareAndSet(curTail, curTail.next.get())
             }
         }
     }
@@ -50,9 +45,10 @@ class MSQueueWithConstantTimeRemove<E> : QueueWithRemove<E> {
             curHeadNext.prev.set(null)
             if (head.compareAndSet(curHead, curHeadNext)) {
                 if (curHeadNext.markExtractedOrRemoved()) {
-                    return curHeadNext.element
+                    val element = curHeadNext.element
+                    curHeadNext.element = null
+                    return element
                 }
-                curHeadNext.next.get() ?: return null
             }
         }
     }
@@ -144,20 +140,24 @@ class MSQueueWithConstantTimeRemove<E> : QueueWithRemove<E> {
             // TODO: in the linked list, especially when it significantly simplifies
             // TODO: the algorithm.
             val removed = markExtractedOrRemoved()
-            val nextNode = next.get() ?: return removed
-            val prevNode = prev.get() ?: return removed
-            prevNode.next.set(nextNode)
-            while (true) {
-                val curPrevNext = nextNode.prev.get() ?: break
-                if (nextNode.prev.compareAndSet(curPrevNext, prevNode)) break
-            }
-            if (prevNode.extractedOrRemoved) {
-                prevNode.remove()
-            }
-            if (nextNode.extractedOrRemoved) {
-                nextNode.remove()
-            }
+            physicalRemove()
             return removed
+        }
+
+        private fun physicalRemove() {
+            val curNext = next.get() ?: return
+            val curPrev = prev.get() ?: return
+            curPrev.next.set(curNext)
+            curNext.prev.setIfNotNull(curPrev)
+            if (curPrev.extractedOrRemoved) curPrev.physicalRemove()
+            if (curNext.extractedOrRemoved) curNext.physicalRemove()
+        }
+
+        private fun <T> AtomicReference<T>.setIfNotNull(value: T) {
+            while (true) {
+                val current = get() ?: break
+                if (compareAndSet(current, value)) break
+            }
         }
     }
 }
