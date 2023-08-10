@@ -21,7 +21,26 @@ class FlatCombiningQueue<E> : Queue<E> {
         // TODO:      `null` with the element. Wait until either the cell state
         // TODO:      updates to `Result` (do not forget to clean it in this case),
         // TODO:      or `combinerLock` becomes available to acquire.
-        queue.addLast(element)
+        if (combinerLock.compareAndSet(false, true)) {
+            queue.addLast(element)
+            performTheOperations()
+        } else {
+            while (true) {
+                val index = randomCellIndex()
+                if (!tasksForCombiner.compareAndSet(index, null, element)) {
+                    continue
+                }
+                while (true) {
+                    if (combinerLock.compareAndSet(false, true)) {
+                        performTheOperations()
+                    }
+                    if (tasksForCombiner.get(index) is Result<*>) {
+                        tasksForCombiner.set(index, null)
+                        return
+                    }
+                }
+            }
+        }
     }
 
     override fun dequeue(): E? {
@@ -36,11 +55,51 @@ class FlatCombiningQueue<E> : Queue<E> {
         // TODO:      `null` with `Dequeue`. Wait until either the cell state
         // TODO:      updates to `Result` (do not forget to clean it in this case),
         // TODO:      or `combinerLock` becomes available to acquire.
-        return queue.removeFirstOrNull()
+        if (combinerLock.compareAndSet(false, true)) {
+            val result = queue.removeFirstOrNull()
+            performTheOperations()
+            return result
+        } else {
+            while (true) {
+                val index = randomCellIndex()
+                if (!tasksForCombiner.compareAndSet(index, null, Dequeue)) {
+                    continue
+                }
+                while (true) {
+                    if (combinerLock.compareAndSet(false, true)) {
+                        performTheOperations()
+                    }
+                    val cell = tasksForCombiner.get(index)
+                    if (cell is Result<*>) {
+                        tasksForCombiner.set(index, null)
+                        return cell.value as E
+                    }
+                }
+            }
+        }
     }
 
-    private fun randomCellIndex(): Int =
-        ThreadLocalRandom.current().nextInt(tasksForCombiner.length())
+    // TODO: On success, apply this operation and help others by traversing
+    // TODO: `tasksForCombiner`, performing the announced operations, and
+    // TODO: updating the corresponding cells to `Result`.
+    private fun performTheOperations() {
+        require(combinerLock.get()) { "Lock isn't acquired" }
+        for (index in 0 until TASKS_FOR_COMBINER_SIZE) {
+            val cell = tasksForCombiner.get(index)
+            if (cell == null || cell is Result<*>) {
+                continue
+            }
+            if (cell is Dequeue) {
+                tasksForCombiner.set(index, Result(queue.removeFirstOrNull()))
+                continue
+            }
+            tasksForCombiner.set(index, Result(cell))
+            queue.addLast(cell as E)
+        }
+        combinerLock.set(false)
+    }
+
+    private fun randomCellIndex(): Int = ThreadLocalRandom.current().nextInt(tasksForCombiner.length())
 }
 
 private const val TASKS_FOR_COMBINER_SIZE = 3 // Do not change this constant!
